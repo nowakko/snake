@@ -1,0 +1,226 @@
+@page "/"
+@implements IDisposable
+
+<PageTitle>Snake WASM</PageTitle>
+
+<div class="app-shell">
+    <h1>Snake (C# WebAssembly)</h1>
+    <p>Click the board and use arrow keys or WASD to move. Press <strong>R</strong> to restart.</p>
+
+    <div class="scoreboard">
+        <span>Score: <strong>@_score</strong></span>
+        <span>Best: <strong>@_bestScore</strong></span>
+        <span>Speed: <strong>@_speedMs ms</strong></span>
+    </div>
+
+    <div class="board"
+         tabindex="0"
+         @ref="_boardRef"
+         @onkeydown="HandleKeyDown">
+        @for (var row = 0; row < BoardSize; row++)
+        {
+            <div class="board-row">
+                @for (var col = 0; col < BoardSize; col++)
+                {
+                    var cssClass = GetCellClass(row, col);
+                    <div class="cell @cssClass"></div>
+                }
+            </div>
+        }
+    </div>
+
+    @if (_isGameOver)
+    {
+        <p class="game-over">Game over! Press R to play again.</p>
+    }
+</div>
+
+<style>
+    .app-shell { max-width: 720px; margin: 2rem auto; font-family: Arial, sans-serif; color: #f3f4f6; }
+    body { margin: 0; background: #111827; }
+    h1 { margin-bottom: 0.25rem; }
+    .scoreboard { display: flex; gap: 1.5rem; margin: 1rem 0; }
+    .board { display: inline-block; outline: none; border: 2px solid #374151; border-radius: 4px; background: #030712; }
+    .board:focus { border-color: #10b981; box-shadow: 0 0 0 2px rgba(16,185,129,0.4); }
+    .board-row { display: flex; }
+    .cell { width: 24px; height: 24px; border: 1px solid #111827; box-sizing: border-box; }
+    .snake { background: #34d399; }
+    .head { background: #10b981; }
+    .food { background: #f87171; border-radius: 50%; }
+    .game-over { margin-top: 1rem; color: #fca5a5; font-weight: bold; }
+</style>
+
+@code {
+    private const int BoardSize = 20;
+    private readonly Random _random = new();
+    private readonly LinkedList<GridPoint> _snake = [];
+
+    private GridPoint _food;
+    private GridPoint _direction = new(1, 0);
+    private GridPoint _pendingDirection = new(1, 0);
+    private ElementReference _boardRef;
+
+    private System.Timers.Timer? _timer;
+    private bool _isGameOver;
+    private int _score;
+    private int _bestScore;
+    private int _speedMs = 140;
+
+    protected override void OnInitialized()
+    {
+        ResetGame();
+
+        _timer = new System.Timers.Timer(_speedMs);
+        _timer.Elapsed += async (_, _) =>
+        {
+            await InvokeAsync(() =>
+            {
+                Tick();
+                StateHasChanged();
+            });
+        };
+        _timer.AutoReset = true;
+        _timer.Start();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await _boardRef.FocusAsync();
+        }
+    }
+
+    private void Tick()
+    {
+        if (_isGameOver)
+        {
+            return;
+        }
+
+        if (IsOpposite(_direction, _pendingDirection) is false)
+        {
+            _direction = _pendingDirection;
+        }
+
+        var nextHead = _snake.First!.Value + _direction;
+
+        if (nextHead.X < 0 || nextHead.Y < 0 || nextHead.X >= BoardSize || nextHead.Y >= BoardSize)
+        {
+            _isGameOver = true;
+            return;
+        }
+
+        if (_snake.Contains(nextHead))
+        {
+            _isGameOver = true;
+            return;
+        }
+
+        _snake.AddFirst(nextHead);
+
+        if (nextHead == _food)
+        {
+            _score++;
+            _bestScore = Math.Max(_bestScore, _score);
+            SpawnFood();
+
+            if (_score % 4 == 0 && _speedMs > 70)
+            {
+                _speedMs -= 10;
+                if (_timer is not null)
+                {
+                    _timer.Interval = _speedMs;
+                }
+            }
+        }
+        else
+        {
+            _snake.RemoveLast();
+        }
+    }
+
+    private void ResetGame()
+    {
+        _snake.Clear();
+        _snake.AddFirst(new GridPoint(8, 10));
+        _snake.AddLast(new GridPoint(7, 10));
+        _snake.AddLast(new GridPoint(6, 10));
+        _direction = new GridPoint(1, 0);
+        _pendingDirection = _direction;
+        _score = 0;
+        _speedMs = 140;
+        _isGameOver = false;
+        SpawnFood();
+
+        if (_timer is not null)
+        {
+            _timer.Interval = _speedMs;
+            _timer.Start();
+        }
+    }
+
+    private void SpawnFood()
+    {
+        do
+        {
+            _food = new GridPoint(_random.Next(BoardSize), _random.Next(BoardSize));
+        }
+        while (_snake.Contains(_food));
+    }
+
+    private static bool IsOpposite(GridPoint current, GridPoint candidate)
+        => current.X + candidate.X == 0 && current.Y + candidate.Y == 0;
+
+    private void HandleKeyDown(KeyboardEventArgs e)
+    {
+        _pendingDirection = e.Key.ToLowerInvariant() switch
+        {
+            "arrowup" or "w" => new GridPoint(0, -1),
+            "arrowdown" or "s" => new GridPoint(0, 1),
+            "arrowleft" or "a" => new GridPoint(-1, 0),
+            "arrowright" or "d" => new GridPoint(1, 0),
+            "r" => RestartAndKeepFocus(),
+            _ => _pendingDirection
+        };
+    }
+
+    private GridPoint RestartAndKeepFocus()
+    {
+        ResetGame();
+        return _pendingDirection;
+    }
+
+    private string GetCellClass(int row, int col)
+    {
+        var point = new GridPoint(col, row);
+        if (_snake.First?.Value == point)
+        {
+            return "snake head";
+        }
+
+        if (point == _food)
+        {
+            return "food";
+        }
+
+        return _snake.Contains(point) ? "snake" : string.Empty;
+    }
+
+    public void Dispose()
+    {
+        if (_timer is null)
+        {
+            return;
+        }
+
+        _timer.Stop();
+        _timer.Dispose();
+    }
+
+    private readonly record struct GridPoint(int X, int Y)
+    {
+        public static GridPoint operator +(GridPoint left, GridPoint right)
+            => new(left.X + right.X, left.Y + right.Y);
+    }
+}
