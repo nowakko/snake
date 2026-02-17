@@ -103,13 +103,10 @@
             _direction = _pendingDirection;
         }
 
-        var nextHead = _snake.First!.Value + _direction;
-
-        if (nextHead.X < 0 || nextHead.Y < 0 || nextHead.X >= BoardSize || nextHead.Y >= BoardSize)
-        {
-            _isGameOver = true;
-            return;
-        }
+        var rawHead = _snake.First!.Value + _direction;
+        var nextHead = new GridPoint(
+            ((rawHead.X % BoardSize) + BoardSize) % BoardSize,
+            ((rawHead.Y % BoardSize) + BoardSize) % BoardSize);
 
         if (_snake.Contains(nextHead))
         {
